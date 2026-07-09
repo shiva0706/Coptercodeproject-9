@@ -6,7 +6,10 @@ const { requireAuth } = require('../middleware/auth');
 const router = express.Router();
 router.use(requireAuth);
 
-const SUPPORTED_PLATFORMS = ['instagram', 'tiktok', 'x', 'linkedin', 'facebook', 'youtube'];
+const SUPPORTED_PLATFORMS = [
+  'instagram', 'tiktok', 'x', 'linkedin', 'facebook', 'youtube',
+  'discord', 'reddit', 'pinterest', 'bluesky', 'tumblr', 'threads', 'snapchat',
+];
 
 router.get('/', (req, res) => {
   const accounts = db.prepare('SELECT * FROM social_accounts WHERE user_id = ?').all(req.userId);

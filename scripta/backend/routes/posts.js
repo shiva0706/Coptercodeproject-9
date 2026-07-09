@@ -9,12 +9,24 @@ const router = express.Router();
 router.use(requireAuth);
 
 // List all posts for the current user, optionally filtered by status and/or campaign
+// List all posts for the current user, optionally filtered by status,
+// campaign, and/or a date range (from/to, ISO strings). Range filtering
+// only applies to dated posts - undated drafts always come back, since
+// the UI keeps them in a permanent "not yet dated" tray rather than
+// placing them on a specific day.
 router.get('/', (req, res) => {
-  const { status, campaign_id } = req.query;
+  const { status, campaign_id, from, to } = req.query;
   let sql = 'SELECT * FROM posts WHERE user_id = ?';
   const params = [req.userId];
   if (status) { sql += ' AND status = ?'; params.push(status); }
   if (campaign_id) { sql += ' AND campaign_id = ?'; params.push(campaign_id); }
+  if (from || to) {
+    const dateExpr = 'COALESCE(scheduled_at, published_at)';
+    const rangeClauses = [];
+    if (from) { rangeClauses.push(`${dateExpr} >= ?`); params.push(from); }
+    if (to) { rangeClauses.push(`${dateExpr} <= ?`); params.push(to); }
+    sql += ` AND ((scheduled_at IS NULL AND published_at IS NULL) OR (${rangeClauses.join(' AND ')}))`;
+  }
   sql += ' ORDER BY created_at DESC';
   const posts = db.prepare(sql).all(...params);
   res.json({ posts });

@@ -72,4 +72,10 @@ for (const [column, sql] of migrations) {
   }
 }
 
+const usersColumns = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
+if (!usersColumns.includes('default_platforms')) {
+  db.exec("ALTER TABLE users ADD COLUMN default_platforms TEXT DEFAULT ''");
+}
+
 module.exports = db;
+

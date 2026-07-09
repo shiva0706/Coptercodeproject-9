@@ -27,6 +27,13 @@ const PLATFORM_SPECS = {
   linkedin:  { width: 1200, height: 627,  ratioLabel: '1.91:1' },
   facebook:  { width: 1200, height: 630,  ratioLabel: '1.91:1' },
   youtube:   { width: 1280, height: 720,  ratioLabel: '16:9' },
+  discord:   { width: 1280, height: 720,  ratioLabel: '16:9' },   // embeds render best at 16:9
+  reddit:    { width: 1080, height: 1350, ratioLabel: '4:5' },     // feed crops close to Instagram's
+  pinterest: { width: 1000, height: 1500, ratioLabel: '2:3' },     // Pins are tall
+  bluesky:   { width: 1200, height: 675,  ratioLabel: '16:9' },    // timeline card, like X
+  tumblr:    { width: 1080, height: 1350, ratioLabel: '4:5' },
+  threads:   { width: 1080, height: 1350, ratioLabel: '4:5' },     // shares Instagram's crop rules
+  snapchat:  { width: 1080, height: 1920, ratioLabel: '9:16' },    // full-screen vertical
 };
 
 const UPLOAD_ROOT = path.join(__dirname, '..', 'uploads');
