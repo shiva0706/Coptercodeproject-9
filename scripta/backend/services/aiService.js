@@ -82,4 +82,53 @@ Respond with only the JSON object described in the system prompt.`;
   return parsed.posts || [];
 }
 
-module.exports = { generatePosts };
+// Reads a handful of the user's own sample posts and suggests short "tone"
+// and "rules" descriptors to seed their brand voice profile - a starting
+// point to edit, not a final answer.
+async function analyzeVoice({ samplePosts }) {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY is not set. Add it to your .env file to enable AI generation.');
+  }
+
+  const systemPrompt = `You are a brand voice analyst. Given a few sample social media posts written by the same person or brand, infer their writing style. Return ONLY valid JSON, no markdown fences, no commentary, in this exact shape:
+{"tone": "a short phrase, under 100 characters, describing the tone (e.g. 'witty and warm, never corporate')", "rules": "a short comma-separated list of concrete likes/dislikes or stylistic habits you noticed, under 300 characters"}`;
+
+  const userPrompt = `Sample posts:\n\n${samplePosts}\n\nAnalyze the tone and any recurring stylistic rules (e.g. hashtag habits, sentence length, use of emoji, recurring phrases, things they seem to avoid). Respond with only the JSON object described in the system prompt.`;
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: 400,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error('Groq API error (' + response.status + '): ' + errText);
+  }
+
+  const data = await response.json();
+  const messageText = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (!messageText) {
+    throw new Error('No text returned from AI model');
+  }
+
+  const cleaned = messageText.replace(/```json|```/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error('Failed to parse AI response as JSON: ' + cleaned.slice(0, 200));
+  }
+}
+
+module.exports = { generatePosts, analyzeVoice };

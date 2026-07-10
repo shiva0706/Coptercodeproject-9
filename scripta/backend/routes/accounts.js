@@ -16,10 +16,11 @@ router.get('/', (req, res) => {
   res.json({ accounts, supported_platforms: SUPPORTED_PLATFORMS });
 });
 
-// NOTE: This is a mock "connect" flow that just stores a handle.
-// A real integration would redirect the user through that platform's OAuth
-// consent screen (e.g. Meta Login, X OAuth 2.0, LinkedIn OAuth) and store
-// the returned access/refresh tokens instead of just a handle.
+// Upsert: one handle per platform per user. This used to always INSERT
+// (fine when it only ran from a dedicated "connect" form on the old
+// Contacts page), but now that the handle field lives inline in Compose and
+// can be edited repeatedly, saving it again for a platform that already has
+// one should update that row instead of creating a duplicate.
 router.post('/', (req, res) => {
   const { platform, handle } = req.body;
 
@@ -28,6 +29,15 @@ router.post('/', (req, res) => {
   }
   if (!handle) {
     return res.status(400).json({ error: 'Handle is required' });
+  }
+
+  const existing = db.prepare('SELECT * FROM social_accounts WHERE user_id = ? AND platform = ?')
+    .get(req.userId, platform);
+
+  if (existing) {
+    db.prepare('UPDATE social_accounts SET handle = ? WHERE id = ?').run(handle, existing.id);
+    const account = db.prepare('SELECT * FROM social_accounts WHERE id = ?').get(existing.id);
+    return res.json({ account });
   }
 
   const id = uuidv4();
