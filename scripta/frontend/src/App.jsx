@@ -5,12 +5,9 @@ import Onboarding from './pages/Onboarding';
 import Dashboard from './pages/Dashboard';
 import Compose from './pages/Compose';
 import BrandVoice from './pages/BrandVoice';
-import Accounts from './pages/Accounts';
 import Calendar from './pages/Calendar';
 import Campaigns from './pages/Campaigns';
-import ScriptaMark from './components/ScriptaMark';
 import BackgroundDoodles from './components/BackgroundDoodles';
-import PostingSoonBadge from './components/PostingSoonBadge';
 import { ToastProvider } from './components/Toast';
 import { api, setToken } from './api';
 
@@ -20,7 +17,6 @@ const TABS = [
   { id: 'calendar', label: 'Calendar' },
   { id: 'campaigns', label: 'Campaigns' },
   { id: 'brand', label: 'Voice' },
-  { id: 'accounts', label: 'Contacts' },
 ];
 
 function AppInner() {
@@ -87,48 +83,51 @@ function AppInner() {
     <div className="min-h-screen relative">
       <BackgroundDoodles />
       <header className="sticky top-0 z-20 cover-band">
-        <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between relative">
+        <div className="max-w-4xl mx-auto px-6 py-3 flex flex-wrap items-center gap-3 justify-between relative">
           <div className="hidden sm:flex flex-col gap-1.5 absolute left-1.5 top-1/2 -translate-y-1/2">
             <span className="binder-ring" />
             <span className="binder-ring" />
             <span className="binder-ring" />
           </div>
-          <div className="flex items-center gap-3 pl-4 sm:pl-6">
-            <ScriptaMark animated={false} className="w-12 h-7" />
-            <span className="font-script text-5xl leading-none text-paper">Scripta</span>
+          <div className="flex flex-col pl-4 sm:pl-6">
+            <div className="flex items-center gap-3">
+              <span className="font-script text-5xl leading-none text-paper">Scripta</span>
+            </div>
+            {user?.name && (
+              <span className="text-base font-label italic uppercase tracking-wide text-paper/70 mt-0.5 ml-1">{user.name}</span>
+            )}
           </div>
-          <nav className="flex gap-1 font-label text-base">
-            {TABS.map((t, i) => (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`px-3 py-1 rounded-t-lg border-2 border-b-0 transition ${
-                  tab === t.id
-                    ? 'bg-paper text-ink border-paper -mb-px'
-                    : 'bg-transparent text-paper/60 border-transparent hover:text-paper'
-                }`}
-                style={{ transform: `rotate(${i % 2 === 0 ? '-0.6deg' : '0.6deg'})` }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </nav>
-          <button onClick={logout} className="text-xs font-label text-paper/50 hover:text-paper underline decoration-dotted">
-            sign out
-          </button>
-        </div>
-        <div className="max-w-4xl mx-auto px-6 pb-2 flex justify-end">
-          <PostingSoonBadge tab={tab} onOpenCalendar={() => setTab('calendar')} />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <nav className="flex flex-wrap gap-1.5 font-label text-base">
+              {TABS.map((t, i) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className={`px-3.5 py-1.5 rounded-full border-2 transition ${
+                    tab === t.id
+                      ? 'bg-paper text-ink border-paper'
+                      : 'bg-transparent text-paper/60 border-paper/30 hover:text-paper hover:border-paper/60'
+                  }`}
+                  style={{ transform: `rotate(${i % 2 === 0 ? '-0.6deg' : '0.6deg'})` }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </nav>
+            <button onClick={logout} className="px-3.5 py-1.5 rounded-full border-2 border-paper/30 text-xs font-label text-paper/60 hover:text-paper hover:border-paper/60 transition">
+              sign out
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-10 relative z-10">
         {tab === 'dashboard' && <Dashboard refreshKey={refreshKey} />}
         {tab === 'compose' && <Compose defaultPlatforms={defaultPlatforms} onSaved={() => { setRefreshKey((k) => k + 1); setTab('dashboard'); }} />}
-        {tab === 'calendar' && <Calendar refreshKey={refreshKey} defaultPlatforms={defaultPlatforms} />}
+        {tab === 'calendar' && <Calendar refreshKey={refreshKey} />}
         {tab === 'campaigns' && <Campaigns onOpenCampaign={() => setTab('dashboard')} />}
         {tab === 'brand' && <BrandVoice />}
-        {tab === 'accounts' && <Accounts />}
       </main>
     </div>
   );

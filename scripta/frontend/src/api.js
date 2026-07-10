@@ -30,11 +30,10 @@ async function request(path, { method = 'GET', body } = {}) {
 export const api = {
   register: (email, password, name) => request('/auth/register', { method: 'POST', body: { email, password, name } }),
   login: (email, password) => request('/auth/login', { method: 'POST', body: { email, password } }),
-  savePlatforms: (platforms) => request('/auth/platforms', { method: 'PUT', body: { platforms } }),
-  me: () => request('/auth/me'),
 
   getBrand: () => request('/brand'),
   updateBrand: (profile) => request('/brand', { method: 'PUT', body: profile }),
+  analyzeVoice: (sample_posts) => request('/brand/analyze', { method: 'POST', body: { sample_posts } }),
 
   getAccounts: () => request('/accounts'),
   connectAccount: (platform, handle) => request('/accounts', { method: 'POST', body: { platform, handle } }),

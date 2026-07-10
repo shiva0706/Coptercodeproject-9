@@ -53,3 +53,64 @@ export const PLATFORM_HEX = {
 };
 
 export const ALL_PLATFORMS = Object.keys(PLATFORM_LABELS);
+
+// Character limits per platform. Where a platform actually enforces a hard
+// ceiling (the post would get cut off or rejected past this point), it's
+// listed here AND in PLATFORM_HARD_LIMIT below. Platforms with effectively
+// no real-world limit (Facebook, Reddit, Tumblr) are simply omitted - the
+// UI just shows a running count for those with no red-line warning.
+export const PLATFORM_CHAR_LIMIT = {
+  x: 280,
+  bluesky: 300,
+  threads: 500,
+  snapchat: 250,
+  pinterest: 500,
+  instagram: 2200,
+  tiktok: 2200,
+  discord: 2000,
+  linkedin: 3000,
+  youtube: 5000,
+};
+
+// Platforms where PLATFORM_CHAR_LIMIT is a real hard limit (the platform
+// itself will truncate or reject anything longer) rather than just a
+// generous soft ceiling worth being aware of.
+export const PLATFORM_HARD_LIMIT = new Set(['x', 'bluesky', 'threads', 'snapchat', 'pinterest']);
+
+// Rough textarea row counts so a platform's box shape hints at its style
+// before you even read the character count - short/punchy platforms get
+// compact boxes, long-form platforms get taller ones.
+export const PLATFORM_TEXTAREA_ROWS = {
+  x: 2,
+  bluesky: 2,
+  snapchat: 2,
+  threads: 3,
+  pinterest: 3,
+  instagram: 4,
+  tiktok: 4,
+  discord: 4,
+  youtube: 4,
+  linkedin: 6,
+  facebook: 6,
+  reddit: 6,
+  tumblr: 6,
+};
+
+// Target pixel dimensions matching PLATFORM_RATIOS, shown next to the ratio
+// label so the target size is obvious at a glance (e.g. "1080×1350") rather
+// than just the abstract ratio.
+export const PLATFORM_DIMENSIONS = {
+  instagram: { width: 1080, height: 1350 },
+  tiktok: { width: 1080, height: 1920 },
+  x: { width: 1200, height: 675 },
+  linkedin: { width: 1200, height: 627 },
+  facebook: { width: 1200, height: 630 },
+  youtube: { width: 1280, height: 720 },
+  discord: { width: 1280, height: 720 },
+  reddit: { width: 1080, height: 1350 },
+  pinterest: { width: 1000, height: 1500 },
+  bluesky: { width: 1200, height: 675 },
+  tumblr: { width: 1080, height: 1350 },
+  threads: { width: 1080, height: 1350 },
+  snapchat: { width: 1080, height: 1920 },
+};

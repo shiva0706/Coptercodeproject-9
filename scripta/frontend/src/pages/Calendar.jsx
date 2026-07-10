@@ -6,6 +6,12 @@ import ConfirmButton from '../components/ConfirmButton';
 import { FlowerSprig } from '../components/Doodles';
 
 const STATUS_RING = { draft: 'border-ink/30', scheduled: 'border-tape', published: 'border-moss', failed: 'border-clay' };
+const STATUS_LEGEND = [
+  { key: 'draft', label: 'draft' },
+  { key: 'scheduled', label: 'scheduled' },
+  { key: 'published', label: 'published' },
+  { key: 'failed', label: 'failed' },
+];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const STATUS_FILTERS = ['', 'draft', 'scheduled', 'published', 'failed'];
@@ -153,15 +159,26 @@ const DayCell = memo(function DayCell({
       onDragOver={(e) => { e.preventDefault(); onDragOverCell(cellKey); }}
       onDragLeave={() => onDragLeaveCell(cellKey)}
       onDrop={(e) => onDropCell(e, cellKey)}
-      className={`text-left rounded border-2 p-1.5 min-h-[70px] transition ${inMonth ? '' : 'opacity-40'} ${
+      className={`group relative text-left rounded border-2 p-1.5 min-h-[70px] transition ${inMonth ? '' : 'opacity-40'} ${
         isSelected ? 'border-scripta' : isDragOver ? 'border-scripta border-dashed' : isToday ? 'border-tape' : 'border-line'
       }`}
       style={{ backgroundColor: dayPosts.length > 0 ? `rgba(63,102,89,${(0.05 + intensity * 0.25).toFixed(2)})` : inMonth ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)' }}
     >
-      <div className={`text-xs font-mono flex items-center gap-1 ${isToday ? 'text-tape font-bold' : 'text-ink/60'}`}>
-        {dayNum}{isToday && <span>📍</span>}
+      {isToday && (
+        <div
+          className="washi-tape"
+          style={{ width: '36px', height: '11px', top: '-5px', left: '50%', transform: 'translateX(-50%) rotate(-3deg)' }}
+        />
+      )}
+      {dayPosts.length === 0 && inMonth && (
+        <span className="absolute inset-0 flex items-center justify-center text-ink/0 group-hover:text-ink/20 text-xl font-light transition pointer-events-none">
+          +
+        </span>
+      )}
+      <div className={`text-xs font-mono relative ${isToday ? 'text-tape font-bold' : 'text-ink/60'}`}>
+        {dayNum}
       </div>
-      <div className="flex flex-col gap-0.5 mt-1">
+      <div className="flex flex-col gap-0.5 mt-1 relative">
         {dayPosts.slice(0, 3).map((p) => (
           <div
             key={p.id}
@@ -207,6 +224,9 @@ export default function Calendar({ refreshKey, defaultPlatforms }) {
   const [weekCursor, setWeekCursor] = useState(() => startOfWeek(new Date()));
   const [statusFilter, setStatusFilter] = useState('');
   const [platformFilter, setPlatformFilter] = useState(() => new Set(myPlatforms));
+  // Same collapsible "folder tab" treatment as the platform picker on the
+  // Write page - keeps the toolbar from opening with a wall of 13 pills.
+  const [platformDrawerOpen, setPlatformDrawerOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
   const [focusedKey, setFocusedKey] = useState(dateKey(new Date()));
   const [rescheduling, setRescheduling] = useState(null);
@@ -215,8 +235,20 @@ export default function Calendar({ refreshKey, defaultPlatforms }) {
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkShiftDays, setBulkShiftDays] = useState(1);
+  // Replaces window.confirm for the drag-and-drop conflict check - a native
+  // browser dialog looked jarring dropped into the journal styling.
+  // { message, resolve } while a confirmation is pending, otherwise null.
+  const [confirmState, setConfirmState] = useState(null);
   const showToast = useToast();
   const postsByDateCacheRef = useRef({});
+
+  function askConfirm(message) {
+    return new Promise((resolve) => setConfirmState({ message, resolve }));
+  }
+  function resolveConfirm(answer) {
+    confirmState?.resolve(answer);
+    setConfirmState(null);
+  }
 
   // --- fetching, scoped to what's actually visible (+ status filter) ---
   // Month/week views only ask the server for their visible range; agenda
@@ -392,46 +424,41 @@ export default function Calendar({ refreshKey, defaultPlatforms }) {
     const holdingShift = e.shiftKey;
     setDragOverKey(null);
     const postId = e.dataTransfer.getData('text/plain');
+    const post = posts.find((p) => p.id === postId);
+    if (!post || post.status === 'published') return;
 
-    setPosts((currentPosts) => {
-      const post = currentPosts.find((p) => p.id === postId);
-      if (!post || post.status === 'published') return currentPosts;
+    const existing = postDateObj(post) || new Date();
+    const target = keyToDate(targetKey);
+    target.setHours(existing.getHours(), existing.getMinutes());
 
-      const existing = postDateObj(post) || new Date();
-      const target = keyToDate(targetKey);
-      target.setHours(existing.getHours(), existing.getMinutes());
+    const dayPosts = (postsByDate[targetKey] || []).filter((p) => p.id !== post.id);
+    const conflict = dayPosts.find((p) => p.platform === post.platform && Math.abs(p._time - target) < CONFLICT_WINDOW_MS);
+    if (conflict) {
+      const proceed = await askConfirm(
+        `You already have a ${PLATFORM_LABELS[post.platform] || post.platform} post around ${formatTime(conflict._time)} that day. Schedule this one too?`
+      );
+      if (!proceed) return;
+    }
 
-      const dayPosts = (postsByDate[targetKey] || []).filter((p) => p.id !== post.id);
-      const conflict = dayPosts.find((p) => p.platform === post.platform && Math.abs(p._time - target) < CONFLICT_WINDOW_MS);
-      if (conflict) {
-        const proceed = window.confirm(
-          `You already have a ${PLATFORM_LABELS[post.platform] || post.platform} post around ${formatTime(conflict._time)} that day. Schedule this one too?`
-        );
-        if (!proceed) return currentPosts;
-      }
+    const previous = { scheduled_at: post.scheduled_at, status: post.status };
+    const iso = target.toISOString();
+    setPosts((cur) => cur.map((p) => (p.id === post.id ? { ...p, scheduled_at: iso, status: 'scheduled' } : p)));
 
-      const previous = { scheduled_at: post.scheduled_at, status: post.status };
-      const iso = target.toISOString();
-
-      api.updatePost(post.id, { content: post.content, platform: post.platform, scheduled_at: iso })
-        .then(() => {
-          showToast(`Moved to ${target.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, 'success', {
-            label: 'undo',
-            onClick: async () => {
-              setPosts((cur) => cur.map((p) => (p.id === post.id ? { ...p, ...previous } : p)));
-              await api.updatePost(post.id, { content: post.content, platform: post.platform, scheduled_at: previous.scheduled_at });
-            },
-          });
-          if (holdingShift) startReschedule({ ...post, scheduled_at: iso });
-        })
-        .catch((err) => {
+    try {
+      await api.updatePost(post.id, { content: post.content, platform: post.platform, scheduled_at: iso });
+      showToast(`Moved to ${target.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, 'success', {
+        label: 'undo',
+        onClick: async () => {
           setPosts((cur) => cur.map((p) => (p.id === post.id ? { ...p, ...previous } : p)));
-          showToast(err.message, 'error');
-        });
-
-      return currentPosts.map((p) => (p.id === post.id ? { ...p, scheduled_at: iso, status: 'scheduled' } : p));
-    });
-  }, [postsByDate, showToast]);
+          await api.updatePost(post.id, { content: post.content, platform: post.platform, scheduled_at: previous.scheduled_at });
+        },
+      });
+      if (holdingShift) startReschedule({ ...post, scheduled_at: iso });
+    } catch (err) {
+      setPosts((cur) => cur.map((p) => (p.id === post.id ? { ...p, ...previous } : p)));
+      showToast(err.message, 'error');
+    }
+  }, [posts, postsByDate, showToast]);
 
   // --- keyboard navigation across the month grid ---
   const moveFocus = useCallback((deltaDays) => {
@@ -513,6 +540,7 @@ export default function Calendar({ refreshKey, defaultPlatforms }) {
 
   const selectedPosts = selectedDate ? (postsByDate[selectedDate] || []) : [];
   const sortedAgendaKeys = useMemo(() => Object.keys(postsByDate).sort(), [postsByDate]);
+  const activeFilterPlatforms = myPlatforms.filter((p) => platformFilter.has(p));
 
   return (
     <div className="font-body">
@@ -566,7 +594,7 @@ export default function Calendar({ refreshKey, defaultPlatforms }) {
         </div>
 
         {/* Toolbar row 2: status filter + export */}
-        <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
           {STATUS_FILTERS.map((s) => (
             <button
               key={s || 'all'}
@@ -583,22 +611,75 @@ export default function Calendar({ refreshKey, defaultPlatforms }) {
           </button>
         </div>
 
-        {/* Toolbar row 3: platform filter - only relevant once more than one platform is in play */}
+        {/* Toolbar row 3: platform filter, tucked into a folder tab - same
+            pattern as the destinations picker on the Write page, so 13
+            colored pills don't sit open on the page by default. */}
         {myPlatforms.length > 1 && (
-          <div className="flex flex-wrap items-center gap-1.5 mb-4">
-            <span className="text-xs font-label text-ink/40 mr-1">show:</span>
-            {myPlatforms.map((p) => (
-              <button
-                key={p}
-                onClick={() => togglePlatformFilter(p)}
-                className={`px-2 py-0.5 rounded-full text-[11px] font-label border transition ${
-                  platformFilter.has(p) ? 'text-paper' : 'text-ink/40 border-line bg-transparent'
-                }`}
-                style={platformFilter.has(p) ? { backgroundColor: PLATFORM_HEX[p], borderColor: PLATFORM_HEX[p] } : {}}
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setPlatformDrawerOpen((cur) => !cur)}
+              aria-expanded={platformDrawerOpen}
+              className={`group relative inline-flex items-center gap-2 pl-3.5 pr-3 pt-1.5 pb-2 -mb-px rotate-[-0.6deg] border-2 border-line font-label text-sm text-ink/70 transition ${
+                platformDrawerOpen ? 'bg-white/80 border-b-white/80' : 'bg-tape/40 hover:bg-tape/60'
+              }`}
+              style={{
+                clipPath: 'polygon(6% 0, 94% 0, 100% 35%, 100% 100%, 0 100%, 0 35%)',
+                borderTopLeftRadius: '0.5rem',
+                borderTopRightRadius: '0.5rem',
+              }}
+            >
+              <span className="font-semibold">showing</span>
+              <span className="text-xs font-mono text-ink/40">({platformFilter.size}/{myPlatforms.length})</span>
+              <span
+                className={`inline-block text-ink/50 text-xs transition-transform duration-200 ${platformDrawerOpen ? '-rotate-180' : ''}`}
+                aria-hidden="true"
               >
-                {PLATFORM_LABELS[p]}
-              </button>
-            ))}
+                &#9662;
+              </span>
+            </button>
+
+            <div
+              className={`grid transition-all duration-300 ease-out ${
+                platformDrawerOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+              }`}
+            >
+              <div className="overflow-hidden">
+                <div className="border-2 border-line rounded-b-lg rounded-tr-lg bg-white/70 px-3 py-2.5 flex flex-wrap gap-1.5">
+                  {myPlatforms.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => togglePlatformFilter(p)}
+                      className={`px-2.5 py-1 rounded-full text-xs font-label border transition ${
+                        platformFilter.has(p) ? 'text-paper' : 'text-ink/40 border-line bg-transparent'
+                      }`}
+                      style={platformFilter.has(p) ? { backgroundColor: PLATFORM_HEX[p], borderColor: PLATFORM_HEX[p] } : {}}
+                    >
+                      {PLATFORM_LABELS[p]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {!platformDrawerOpen && (
+              <div className="border-2 border-line rounded-b-lg rounded-tr-lg bg-white/40 px-3 py-1.5 flex flex-wrap gap-1.5">
+                {activeFilterPlatforms.length === 0 ? (
+                  <span className="text-xs font-label text-ink/35">nothing shown — open the tab to pick platforms</span>
+                ) : (
+                  activeFilterPlatforms.map((p) => (
+                    <span
+                      key={p}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-label"
+                      style={{ backgroundColor: `${PLATFORM_HEX[p]}15`, color: PLATFORM_HEX[p] }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: PLATFORM_HEX[p] }} />
+                      {PLATFORM_LABELS[p]}
+                    </span>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -657,8 +738,14 @@ export default function Calendar({ refreshKey, defaultPlatforms }) {
                   onDragOver={(e) => { e.preventDefault(); setDragOverKey(key); }}
                   onDragLeave={() => setDragOverKey((cur) => (cur === key ? null : cur))}
                   onDrop={(e) => handleDrop(e, key)}
-                  className={`rounded border-2 p-2 min-h-[220px] ${isDragOver ? 'border-scripta border-dashed' : isToday ? 'border-tape' : 'border-line'} bg-white/60`}
+                  className={`relative rounded border-2 p-2 min-h-[220px] ${isDragOver ? 'border-scripta border-dashed' : isToday ? 'border-tape' : 'border-line'} bg-white/60`}
                 >
+                  {isToday && (
+                    <div
+                      className="washi-tape"
+                      style={{ width: '40px', height: '12px', top: '-6px', left: '50%', transform: 'translateX(-50%) rotate(-3deg)' }}
+                    />
+                  )}
                   <div className={`text-xs font-mono mb-1 ${isToday ? 'text-tape font-bold' : 'text-ink/60'}`}>
                     {WEEKDAYS[d.getDay()]} {d.getDate()}
                   </div>
@@ -750,15 +837,17 @@ export default function Calendar({ refreshKey, defaultPlatforms }) {
           </div>
         )}
 
-        {/* Platform legend - only the platforms this user actually picked */}
-        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4 text-xs font-label text-ink/60">
-          {myPlatforms.map((p) => (
-            <span key={p} className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PLATFORM_HEX[p] }} /> {PLATFORM_LABELS[p]}
+        {/* Status legend - visual swatches instead of a run-on sentence */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-4 text-[11px] font-label text-ink/50">
+          <span className="text-ink/40">status:</span>
+          {STATUS_LEGEND.map((s) => (
+            <span key={s.key} className="flex items-center gap-1">
+              <span className={`w-3 h-3 rounded-full border-2 bg-white/60 ${STATUS_RING[s.key]}`} />
+              {s.label}
             </span>
           ))}
+          <span className="text-ink/35">· darker tint = busier day · times shown are your local timezone</span>
         </div>
-        <p className="text-[11px] text-ink/40 font-label mt-2">border style shows status: solid ring = published, mustard = scheduled, faint = draft, red = failed. Darker day tint = busier day. Times shown are your local timezone.</p>
       </div>
 
       {/* Day detail as an overlay - no need to scroll the page to see it */}
@@ -789,6 +878,34 @@ export default function Calendar({ refreshKey, defaultPlatforms }) {
                   onRemove={remove}
                 />
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Drag-conflict confirmation - styled to match the journal, replacing
+          the native window.confirm() dialog that used to break the theme. */}
+      {confirmState && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center px-4 bg-ink/50" onClick={() => resolveConfirm(false)}>
+          <div
+            className="journal-page torn-edge-top rounded-b-lg px-6 pt-7 pb-5 max-w-sm w-full relative rotate-[-0.5deg]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="washi-tape washi-pine" />
+            <p className="text-base text-ink font-body leading-relaxed mb-4">{confirmState.message}</p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => resolveConfirm(false)}
+                className="px-3 py-1.5 rounded-full border-2 border-line text-ink/60 text-sm font-label hover:border-ink/40 transition"
+              >
+                cancel
+              </button>
+              <button
+                onClick={() => resolveConfirm(true)}
+                className="px-3 py-1.5 rounded-full bg-scripta text-paper text-sm font-label hover:bg-scriptaDeep transition"
+              >
+                schedule anyway
+              </button>
             </div>
           </div>
         </div>

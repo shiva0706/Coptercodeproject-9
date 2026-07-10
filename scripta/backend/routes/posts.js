@@ -9,24 +9,12 @@ const router = express.Router();
 router.use(requireAuth);
 
 // List all posts for the current user, optionally filtered by status and/or campaign
-// List all posts for the current user, optionally filtered by status,
-// campaign, and/or a date range (from/to, ISO strings). Range filtering
-// only applies to dated posts - undated drafts always come back, since
-// the UI keeps them in a permanent "not yet dated" tray rather than
-// placing them on a specific day.
 router.get('/', (req, res) => {
-  const { status, campaign_id, from, to } = req.query;
+  const { status, campaign_id } = req.query;
   let sql = 'SELECT * FROM posts WHERE user_id = ?';
   const params = [req.userId];
   if (status) { sql += ' AND status = ?'; params.push(status); }
   if (campaign_id) { sql += ' AND campaign_id = ?'; params.push(campaign_id); }
-  if (from || to) {
-    const dateExpr = 'COALESCE(scheduled_at, published_at)';
-    const rangeClauses = [];
-    if (from) { rangeClauses.push(`${dateExpr} >= ?`); params.push(from); }
-    if (to) { rangeClauses.push(`${dateExpr} <= ?`); params.push(to); }
-    sql += ` AND ((scheduled_at IS NULL AND published_at IS NULL) OR (${rangeClauses.join(' AND ')}))`;
-  }
   sql += ' ORDER BY created_at DESC';
   const posts = db.prepare(sql).all(...params);
   res.json({ posts });
@@ -105,13 +93,13 @@ router.post('/:id/publish-now', async (req, res) => {
   const post = db.prepare('SELECT * FROM posts WHERE id = ? AND user_id = ?').get(req.params.id, req.userId);
   if (!post) return res.status(404).json({ error: 'Post not found' });
 
+  // A connected account/handle is optional context now, not a requirement -
+  // it's just set inline in Compose if the user wants "posting as @handle"
+  // to show up in the result. Publishing works the same with or without one.
   const account = db.prepare('SELECT * FROM social_accounts WHERE user_id = ? AND platform = ?')
     .get(req.userId, post.platform);
-  if (!account) {
-    return res.status(400).json({ error: `No connected ${post.platform} account. Connect one first.` });
-  }
 
-  const result = await publish(post, account);
+  const result = await publish(post, account || null);
 
   db.prepare(`
     UPDATE posts SET status = ?, published_at = datetime('now'), publish_result = ?

@@ -55,12 +55,63 @@ async function publishToYoutube(post, account) {
   return simulate('youtube', post, account);
 }
 
+async function publishToDiscord(post, account) {
+  // TODO: Real implementation posts via a Discord webhook (simplest) or a
+  // bot using the Discord API's channel message endpoint.
+  // Docs: https://discord.com/developers/docs/resources/webhook
+  return simulate('discord', post, account);
+}
+
+async function publishToReddit(post, account) {
+  // TODO: Real implementation uses the Reddit API's /api/submit endpoint,
+  // requires a registered app and OAuth2.
+  // Docs: https://www.reddit.com/dev/api/#POST_api_submit
+  return simulate('reddit', post, account);
+}
+
+async function publishToPinterest(post, account) {
+  // TODO: Real implementation uses the Pinterest API's POST /pins endpoint.
+  // Docs: https://developers.pinterest.com/docs/api/v5/#operation/pins/create
+  return simulate('pinterest', post, account);
+}
+
+async function publishToBluesky(post, account) {
+  // TODO: Real implementation uses the AT Protocol's com.atproto.repo.createRecord
+  // (app.bsky.feed.post collection) via an app password or OAuth session.
+  // Docs: https://docs.bsky.app/docs/tutorials/creating-a-post
+  return simulate('bluesky', post, account);
+}
+
+async function publishToTumblr(post, account) {
+  // TODO: Real implementation uses the Tumblr API's POST /v2/blog/{id}/posts.
+  // Docs: https://www.tumblr.com/docs/en/api/v2#postspost-type-legacy---create-a-new-blog-post-legacy
+  return simulate('tumblr', post, account);
+}
+
+async function publishToThreads(post, account) {
+  // TODO: Real implementation uses the Threads API (Meta), a two-step
+  // create-container-then-publish flow similar to Instagram's.
+  // Docs: https://developers.facebook.com/docs/threads
+  return simulate('threads', post, account);
+}
+
+async function publishToSnapchat(post, account) {
+  // TODO: Real implementation uses the Snapchat Marketing/Creative Kit API -
+  // organic posting access is limited and requires platform approval.
+  // Docs: https://developers.snap.com/
+  return simulate('snapchat', post, account);
+}
+
+// account is optional now - Contacts was removed as a standalone page, and
+// setting a handle in Compose is just a nice-to-have, not a requirement to
+// publish. Only mention "as @handle" when one was actually set.
 async function simulate(platform, post, account) {
   await new Promise((resolve) => setTimeout(resolve, 300));
+  const asHandle = account && account.handle ? ` as @${account.handle}` : '';
   return {
     success: true,
     externalId: `simulated-${platform}-${Date.now()}`,
-    message: `Simulated publish to ${platform} as @${account.handle}. Connect real API credentials in .env to go live.`,
+    message: `Simulated publish to ${platform}${asHandle}. Connect real API credentials in .env to go live.`,
   };
 }
 
@@ -71,6 +122,13 @@ const PUBLISHERS = {
   linkedin: publishToLinkedIn,
   facebook: publishToFacebook,
   youtube: publishToYoutube,
+  discord: publishToDiscord,
+  reddit: publishToReddit,
+  pinterest: publishToPinterest,
+  bluesky: publishToBluesky,
+  tumblr: publishToTumblr,
+  threads: publishToThreads,
+  snapchat: publishToSnapchat,
 };
 
 async function publish(post, account) {

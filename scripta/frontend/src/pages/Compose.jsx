@@ -1,21 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import { PLATFORM_LABELS, PLATFORM_RATIOS, PLATFORM_HEX } from '../platformStyles';
+import {
+  PLATFORM_LABELS,
+  PLATFORM_RATIOS,
+  PLATFORM_HEX,
+  ALL_PLATFORMS,
+  PLATFORM_CHAR_LIMIT,
+  PLATFORM_HARD_LIMIT,
+  PLATFORM_TEXTAREA_ROWS,
+  PLATFORM_DIMENSIONS,
+} from '../platformStyles';
 import { useToast } from '../components/Toast';
 import { Speaker, Camera, MagnifyingGlass, LightBulb, Stack, FlowerSprig, Paperclip, EmptyFolder } from '../components/Doodles';
 
 const ROTATIONS = ['-rotate-1', 'rotate-1.5', '-rotate-1.5', 'rotate-1'];
-
-// Rough public character limits per platform, used just to warn people
-// before they paste something too long in - not enforced, just a nudge.
-const PLATFORM_CHAR_LIMIT = {
-  instagram: 2200,
-  tiktok: 2200,
-  x: 280,
-  linkedin: 3000,
-  facebook: 63206,
-  youtube: 5000,
-};
 
 // The idea box isn't tied to one platform, so this is just a generous,
 // generic ceiling to keep ideas as a quick prompt rather than a full draft.
@@ -51,14 +49,19 @@ function useSpeechRecognition(onResult) {
   return { listening, supported, toggle };
 }
 
-export default function Compose({ onSaved }) {
+export default function Compose({ onSaved, defaultPlatforms }) {
   const [idea, setIdea] = useState('');
 
-  // Only platforms the user has actually connected show up here - fetched
-  // fresh on mount, not the full fixed list of every platform we support.
-  const [connectedPlatforms, setConnectedPlatforms] = useState([]);
-  const [accountsLoaded, setAccountsLoaded] = useState(false);
-  const [selected, setSelected] = useState([]);
+  // Platform selection no longer depends on "connected accounts" - Contacts
+  // is gone. Every platform is always selectable; we just default to
+  // whatever the user picked back in Onboarding.
+  const [selected, setSelected] = useState(defaultPlatforms?.length ? defaultPlatforms : ALL_PLATFORMS);
+
+  // The 13 platform toggles live inside a collapsible "folder tab" drawer
+  // now, rather than sitting open on the page by default. Starts closed so
+  // the page reads clean; the tab itself always shows a running count plus
+  // a dotted preview of what's currently picked.
+  const [platformsOpen, setPlatformsOpen] = useState(false);
 
   const [drafts, setDrafts] = useState(null);
   const [error, setError] = useState('');
@@ -77,6 +80,16 @@ export default function Compose({ onSaved }) {
   const [imagePrompt, setImagePrompt] = useState('');
   const [chosenFileName, setChosenFileName] = useState('');
   const fileInputRef = useRef(null);
+
+  // Optional "posting as @handle" per platform - merged in from what used
+  // to be the standalone Contacts page. Purely cosmetic context now: shows
+  // up in the draft preview and the simulated publish result, but never
+  // blocks writing, saving, or publishing. Stored without the leading "@"
+  // so it can never turn into "@@handle" - the "@" is only ever added when
+  // displaying it.
+  const [accountsByPlatform, setAccountsByPlatform] = useState({});
+  const [handleInputs, setHandleInputs] = useState({});
+  const [showHandles, setShowHandles] = useState(false);
 
   const ideaSpeech = useSpeechRecognition((transcript) => setIdea((cur) => (cur ? `${cur} ${transcript}` : transcript)));
   const showToast = useToast();
@@ -98,25 +111,44 @@ export default function Compose({ onSaved }) {
 
   useEffect(() => {
     api.getCampaigns().then((d) => setCampaigns(d.campaigns));
-    api.getAccounts().then((d) => {
-      // accounts come back oldest-connected-first; keep unique platforms in
-      // that order so the toggle row reads in a stable, sensible order.
-      const seen = new Set();
-      const platforms = [];
-      for (const a of d.accounts || []) {
-        if (!seen.has(a.platform)) {
-          seen.add(a.platform);
-          platforms.push(a.platform);
-        }
-      }
-      setConnectedPlatforms(platforms);
-      setSelected(platforms); // default to all connected platforms selected
-      setAccountsLoaded(true);
-    });
+    loadAccounts();
   }, []);
+
+  function loadAccounts() {
+    api.getAccounts().then((d) => {
+      const byPlatform = {};
+      for (const a of d.accounts || []) byPlatform[a.platform] = a;
+      setAccountsByPlatform(byPlatform);
+      const inputs = {};
+      for (const p of ALL_PLATFORMS) inputs[p] = byPlatform[p]?.handle || '';
+      setHandleInputs(inputs);
+    });
+  }
 
   function togglePlatform(p) {
     setSelected((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]));
+  }
+
+  function updateHandleInput(platform, value) {
+    // Strip any leading @ the person types, so the stored/displayed value
+    // never ends up doubled as "@@handle".
+    const clean = value.replace(/^@+/, '');
+    setHandleInputs((cur) => ({ ...cur, [platform]: clean }));
+  }
+
+  async function saveHandle(platform) {
+    const raw = (handleInputs[platform] || '').trim();
+    const existing = accountsByPlatform[platform];
+    if (!raw) {
+      if (existing) {
+        await api.disconnectAccount(existing.id);
+        loadAccounts();
+      }
+      return;
+    }
+    if (existing && existing.handle === raw) return; // nothing changed
+    await api.connectAccount(platform, raw);
+    loadAccounts();
   }
 
   const filteredCampaigns = useMemo(() => {
@@ -208,13 +240,20 @@ export default function Compose({ onSaved }) {
     return { media_path: fitted.url, media_type: fitted.mediaType };
   }
 
+  function isOverHardLimit(platform, content) {
+    const limit = PLATFORM_CHAR_LIMIT[platform];
+    return !!limit && PLATFORM_HARD_LIMIT.has(platform) && content.length > limit;
+  }
+
   async function saveDraft(platform, content) {
+    if (isOverHardLimit(platform, content)) return;
     await api.createPost({ platform, content, campaign_id: campaignId || undefined, ...mediaFieldsFor(platform) });
     showToast('Saved as draft', 'success');
     onSaved();
   }
 
   async function schedule(platform, content) {
+    if (isOverHardLimit(platform, content)) return;
     const when = scheduleFor[platform];
     if (!when) return;
     await api.createPost({
@@ -269,43 +308,125 @@ export default function Compose({ onSaved }) {
           <form onSubmit={generate} className="journal-page torn-edge-top rounded-b-lg px-6 pt-8 pb-6 mb-10 relative rotate-[-0.4deg] space-y-5">
             <div className="washi-tape washi-pine" />
 
+            {/* --- Destinations folder tab ------------------------------ */}
             <div>
-              <label className="block text-base font-label text-ink/70 mb-2">which platforms?</label>
-              {!accountsLoaded ? (
-                <p className="text-base text-ink/40 font-label">checking your contacts…</p>
-              ) : connectedPlatforms.length === 0 ? (
-                <p className="text-base text-clay font-label px-3 py-2 rounded-lg bg-clay/10 border-2 border-clay/30 w-fit">
-                  no platforms connected yet — pin some in on the Contacts page first.
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {connectedPlatforms.map((p) => {
-                    const isOn = selected.includes(p);
-                    return (
-                      <button
-                        type="button"
+              <button
+                type="button"
+                onClick={() => setPlatformsOpen((cur) => !cur)}
+                aria-expanded={platformsOpen}
+                className={`group relative inline-flex items-center gap-2 pl-4 pr-3.5 pt-2 pb-2.5 -mb-px -rotate-1 border-2 border-line font-label text-base text-ink/80 transition ${
+                  platformsOpen ? 'bg-white/80 border-b-white/80' : 'bg-tape/50 hover:bg-tape/70'
+                }`}
+                style={{
+                  clipPath: 'polygon(6% 0, 94% 0, 100% 35%, 100% 100%, 0 100%, 0 35%)',
+                  borderTopLeftRadius: '0.6rem',
+                  borderTopRightRadius: '0.6rem',
+                }}
+              >
+                <Stack className="w-4 h-4 shrink-0" color="#2A2118" />
+                <span className="font-semibold tracking-wide">destinations</span>
+                <span className="text-sm font-mono text-ink/40">({selected.length})</span>
+                <span
+                  className={`inline-block text-ink/50 text-sm transition-transform duration-200 ${platformsOpen ? '-rotate-180' : ''}`}
+                  aria-hidden="true"
+                >
+                  &#9662;
+                </span>
+              </button>
+
+              {/* Closed-state preview: a dotted strip of the platforms
+                  already picked, so nothing feels hidden - just tucked away. */}
+              {!platformsOpen && (
+                <div className="border-2 border-line rounded-b-lg rounded-tr-lg bg-white/40 px-3 py-2 flex items-center flex-wrap gap-1.5">
+                  {selected.length === 0 ? (
+                    <span className="text-sm font-label text-ink/35">nothing picked yet - open the tab above</span>
+                  ) : (
+                    selected.map((p) => (
+                      <span
                         key={p}
-                        onClick={() => togglePlatform(p)}
-                        className={`flex items-center gap-2 px-3.5 py-2 rounded-full text-base font-label border-2 transition ${
-                          isOn ? 'text-paper border-transparent font-medium' : 'font-semibold border-line hover:border-scripta/50'
-                        }`}
-                        style={
-                          isOn
-                            ? { backgroundColor: PLATFORM_HEX[p] }
-                            : { backgroundColor: `${PLATFORM_HEX[p]}0D`, color: PLATFORM_HEX[p] }
-                        }
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-full text-sm font-label"
+                        style={{ backgroundColor: `${PLATFORM_HEX[p]}15`, color: PLATFORM_HEX[p] }}
                       >
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: isOn ? 'rgba(255,255,255,0.8)' : PLATFORM_HEX[p] }}
-                        />
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: PLATFORM_HEX[p] }} />
                         {PLATFORM_LABELS[p]}
-                      </button>
-                    );
-                  })}
+                      </span>
+                    ))
+                  )}
                 </div>
               )}
+
+              {/* Open-state drawer */}
+              <div
+                className={`grid transition-all duration-300 ease-out ${
+                  platformsOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                }`}
+              >
+                <div className="overflow-hidden">
+                  <div className="border-2 border-line rounded-b-lg rounded-tr-lg bg-white/70 p-4 space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      {ALL_PLATFORMS.map((p) => {
+                        const isOn = selected.includes(p);
+                        return (
+                          <button
+                            type="button"
+                            key={p}
+                            onClick={() => togglePlatform(p)}
+                            className={`flex items-center gap-2 px-3.5 py-2 rounded-full text-base font-label border-2 transition ${
+                              isOn ? 'text-paper border-transparent font-medium' : 'font-semibold border-line hover:border-scripta/50'
+                            }`}
+                            style={
+                              isOn
+                                ? { backgroundColor: PLATFORM_HEX[p] }
+                                : { backgroundColor: `${PLATFORM_HEX[p]}0D`, color: PLATFORM_HEX[p] }
+                            }
+                          >
+                            <span
+                              className="w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: isOn ? 'rgba(255,255,255,0.8)' : PLATFORM_HEX[p] }}
+                            />
+                            {PLATFORM_LABELS[p]}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {selected.length > 0 && (
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => setShowHandles((cur) => !cur)}
+                          className="text-sm font-label text-ink/50 hover:text-scripta underline decoration-dotted"
+                        >
+                          {showHandles ? 'hide' : '+ add handles'} <span className="text-ink/35">(optional)</span>
+                        </button>
+                        {showHandles && (
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {selected.map((p) => (
+                              <div key={p} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 border-line bg-white/60">
+                                <span
+                                  className="w-2 h-2 rounded-full shrink-0"
+                                  style={{ backgroundColor: PLATFORM_HEX[p] }}
+                                />
+                                <span className="text-sm font-label text-ink/50">{PLATFORM_LABELS[p]}</span>
+                                <span className="text-sm font-mono text-ink/40">@</span>
+                                <input
+                                  value={handleInputs[p] || ''}
+                                  onChange={(e) => updateHandleInput(p, e.target.value)}
+                                  onBlur={() => saveHandle(p)}
+                                  placeholder="yourhandle"
+                                  className="w-24 text-sm font-mono bg-transparent outline-none placeholder:text-ink/30"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
+            {/* --- /Destinations folder tab ----------------------------- */}
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -465,8 +586,14 @@ export default function Compose({ onSaved }) {
               {drafts.map((d, i) => {
                 const fitted = fittedByPlatform[d.platform];
                 const limit = PLATFORM_CHAR_LIMIT[d.platform];
+                const isHard = PLATFORM_HARD_LIMIT.has(d.platform);
                 const len = d.content.length;
-                const overLimit = limit && len > limit;
+                const overLimit = !!limit && len > limit;
+                const nearLimit = !!limit && !overLimit && len > limit * 0.9;
+                const blocked = isHard && overLimit;
+                const dims = PLATFORM_DIMENSIONS[d.platform];
+                const handle = accountsByPlatform[d.platform]?.handle;
+
                 return (
                   <div key={d.platform} className={`journal-page torn-edge-top rounded-b-lg px-5 pt-7 pb-5 relative ${ROTATIONS[i % ROTATIONS.length]} space-y-2`}>
                     <div className={`washi-tape ${i % 2 === 0 ? '' : 'washi-pine'}`} />
@@ -476,8 +603,13 @@ export default function Compose({ onSaved }) {
                         <div className="ink-stamp inline-block px-2 py-0.5 text-base font-label uppercase tracking-wide text-scripta -rotate-2">
                           {PLATFORM_LABELS[d.platform] || d.platform}
                         </div>
+                        {handle && <span className="text-sm font-mono text-ink/40">as @{handle}</span>}
                       </div>
-                      {media && <span className="text-sm text-ink/40 font-mono">{PLATFORM_RATIOS[d.platform]}</span>}
+                      {media && (
+                        <span className="text-sm text-ink/40 font-mono">
+                          {PLATFORM_RATIOS[d.platform]}{dims ? ` · ${dims.width}×${dims.height}` : ''}
+                        </span>
+                      )}
                     </div>
 
                     {media && (
@@ -503,16 +635,23 @@ export default function Compose({ onSaved }) {
                     <textarea
                       value={d.content}
                       onChange={(e) => updateDraft(d.platform, e.target.value)}
-                      rows={4}
-                      className={`w-full px-3 py-2 rounded border-2 bg-white/80 text-base ${overLimit ? 'border-clay' : 'border-line'}`}
+                      rows={PLATFORM_TEXTAREA_ROWS[d.platform] || 4}
+                      className={`w-full px-3 py-2 rounded border-2 bg-white/80 text-base ${blocked ? 'border-clay' : 'border-line'}`}
                     />
-                    {limit && (
-                      <p className={`text-sm font-mono text-right ${overLimit ? 'text-clay font-bold' : 'text-ink/40'}`}>
-                        {len}/{limit}{overLimit ? ' — over the limit' : ''}
+                    <div className="flex items-center justify-between">
+                      {blocked ? (
+                        <p className="text-sm font-label text-clay">over the limit — {PLATFORM_LABELS[d.platform]} will cut this off or reject it</p>
+                      ) : <span />}
+                      <p className={`text-sm font-mono ${blocked ? 'text-clay font-bold' : nearLimit ? 'text-tape font-bold' : 'text-ink/40'}`}>
+                        {limit ? `${len}/${limit}` : `${len} chars`}
                       </p>
-                    )}
+                    </div>
                     <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <button onClick={() => saveDraft(d.platform, d.content)} className="px-3 py-1.5 rounded bg-ink text-paper text-sm font-label hover:bg-ink/80 transition">
+                      <button
+                        onClick={() => saveDraft(d.platform, d.content)}
+                        disabled={blocked}
+                        className="px-3 py-1.5 rounded bg-ink text-paper text-sm font-label hover:bg-ink/80 transition disabled:opacity-40"
+                      >
                         save as draft
                       </button>
                       <input
@@ -523,7 +662,7 @@ export default function Compose({ onSaved }) {
                       />
                       <button
                         onClick={() => schedule(d.platform, d.content)}
-                        disabled={!scheduleFor[d.platform]}
+                        disabled={!scheduleFor[d.platform] || blocked}
                         className="px-3 py-1.5 rounded bg-scripta text-paper text-sm font-label hover:bg-scriptaDeep transition disabled:opacity-40"
                       >
                         schedule
@@ -554,7 +693,7 @@ export default function Compose({ onSaved }) {
               </li>
               <li className="flex gap-2">
                 <Stack className="w-5 h-4 shrink-0 mt-0.5" color="#3F6659" />
-                pick every platform you want up front — one idea, written for all of them at once.
+                open the destinations tab to pick every platform you want up front — one idea, written for all of them at once.
               </li>
             </ul>
           </div>
