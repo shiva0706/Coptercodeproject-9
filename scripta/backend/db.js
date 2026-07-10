@@ -7,7 +7,6 @@ const path = require('path');
 const db = new DatabaseSync(path.join(__dirname, 'scripta.db'));
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
-
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
